@@ -143,6 +143,8 @@ ControlledMotor motor2(motor1, pot1);
 void setup() {
     // Setup code goes here
     Serial.begin(115200);
+
+    /*
     delay(1000);
     motor1.setMotorSpeed(100);
     motor1.clockwise = false;
@@ -153,15 +155,11 @@ void setup() {
     motor1.rotate();
     delay(10000);
     motor1.stop();
+    */
 }
 
 int outputCounter = 0;
 
-void loop()
-{
-
-}
-/*
 void loop() {
     // Check for incoming Serial data
     if (Serial.available() > 0) {
@@ -184,13 +182,12 @@ void loop() {
         }
     }
 
-
-    
+    /*
     Serial.print("Percentage: ");
     Serial.print(pot1.readPot());
     Serial.println("%");
+    */
     
-
     motor2.rotate();
 }
-*/
+
