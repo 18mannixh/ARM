@@ -3,11 +3,12 @@ struct Motor {
     int input1;           // Input 1 on the L298N
     int input2;           // Input 2 on the L298N
     int enable;           // Enable (PWM) pin on the L298N (optional)
-    bool clockwise = true; // Boolean indicating the rotation direction
-    int motorSpeed = 255;  // Motor rotation speed (0-255)
+    bool isClockwise = true; // Boolean indicating the rotation direction
+    int speed = 255;      // Motor rotation speed (0-255)
 
     // Constructor to initialize the motor with optional enable pin
-    Motor(int input1, int input2, int enable = -1, int motorSpeed = 255) : input1(input1), input2(input2), enable(enable), motorSpeed(motorSpeed) {
+    Motor(int input1, int input2, int enable = -1, int speed = 255) 
+        : input1(input1), input2(input2), enable(enable), speed(speed) {
         pinMode(input1, OUTPUT);
         pinMode(input2, OUTPUT);
         if (enable != -1) {
@@ -17,7 +18,7 @@ struct Motor {
 
     // Method to rotate the motor in the specified direction
     void rotate() {
-        if (clockwise) {
+        if (isClockwise) {
             digitalWrite(input1, HIGH);
             digitalWrite(input2, LOW);
         } else {
@@ -27,10 +28,10 @@ struct Motor {
     }
 
     // Method to set the motor speed (if PWM is used)
-    void setMotorSpeed(int speed) {
-        motorSpeed = constrain(speed, 0, 255);
+    void setSpeed(int s) {
+        speed = constrain(s, 0, 255);
         if (enable != -1) {
-            analogWrite(enable, motorSpeed);
+            analogWrite(enable, speed);
         }
     }
 
@@ -54,9 +55,16 @@ struct Potentiometer {
 
     // Method to read potentiometer value
     // Note: The reading of the potentiometer increases in the anti-clockwise direction
-    int readPot() {
+    int readValue() {
         int potValue = analogRead(output);
         return map(potValue, 0, 1023, 100, 0);
+    }
+
+    void printData()
+    {
+        Serial.print("Percentage: ");
+        Serial.print(readValue());
+        Serial.println("%");
     }
 };
 
@@ -65,64 +73,102 @@ class ControlledMotor {
 private:
     Motor motor;           // Motor instance
     Potentiometer pot;     // Potentiometer instance
-    int minValue = 5;      // Minimum potentiometer value
-    int maxValue = 95;     // Maximum potentiometer value
-    float stdUncertainty = 1.0f; // Standard uncertainty/error in the motor rotation (measured as a percentage)
-    int desiredValue = 50; // Desired potentiometer value for motor rotation
-    bool isRotating = false;
-    bool motorSet = false;
+    int minPotValue = 5;   // Minimum potentiometer value
+    int maxPotValue = 95;  // Maximum potentiometer value
+    float uncertainty = 1.0f; // Standard uncertainty/error in the motor rotation (measured as a percentage)
+    int targetValue = 50;   // Desired potentiometer value for motor rotation
+    bool isMoving = false;
+    bool speedSet = false;
+    bool preventLockUp = false;
+
+    int delayInterval = 10; // Time delay between motor rotation checks
+    int lastValue = -1;
+    int currentValue = -1;
 
 public:
     // Constructor
-    ControlledMotor(const Motor& motor, const Potentiometer& pot, float stdUncertainty = 1.0f, int minValue = 5, int maxValue = 95)
-        : motor(motor), pot(pot), stdUncertainty(stdUncertainty), minValue(minValue), maxValue(maxValue) {
+    ControlledMotor(const Motor& m, const Potentiometer& p, float uncertainty = 1.0f, int min = 5, int max = 95)
+        : motor(m), pot(p), uncertainty(uncertainty), minPotValue(min), maxPotValue(max) {
     }
 
     // Method to check if the value is within the uncertainty range
-    bool outsideUncertaintyRange(int value, int desired, float uncertainty) {
+    bool isOutsideRange(int value, int desired, float uncertainty) {
         return (value < desired - uncertainty) || (value > desired + uncertainty);
     }
 
     // Method to set the motor rotation to a specified angle (percentage)
-    void setRotationAngle(int target) {
-        // Ensure the desired percentage is within valid boundaries
-        desiredValue = constrain(target, minValue, maxValue);
-        int currentValue = pot.readPot();
-        if (outsideUncertaintyRange(currentValue, desiredValue, stdUncertainty)) {
-            isRotating = true;
-            motorSet = false;
+    void setRotation(int angle) {
+        targetValue = constrain(angle, minPotValue, maxPotValue);
+        int value = pot.readValue();
+        if (isOutsideRange(value, targetValue, uncertainty)) {
+            isMoving = true;
+            speedSet = false;
         }
     }
 
-    // Method to set the motor rotation based on the desired angle
-    void setMotor(int target) {
-        motor.clockwise = pot.readPot() < target; // set the direction of rotation towards the desired angle
+    // Method to set the motor rotation direction and start the motor
+    void moveMotor(int target) {
+        motor.isClockwise = pot.readValue() < target; 
+        Serial.println(motor.isClockwise);
+        Serial.println(pot.readValue());
+        motor.setSpeed(50);
         motor.rotate();
-        motorSet = true;
+        speedSet = true;
     }
 
-    // Method to rotate the motor
-    // Note: need to add code to "decay" rotation speed when reaching target
+    // Main method to control motor rotation
     void rotate() {
-        if (isRotating) {
-            if (!motorSet) {
-                setMotor(desiredValue);
+        if (isMoving) {
+            if (!speedSet) {
+                moveMotor(targetValue);
             }
 
-            int currentValue = pot.readPot();
-            if (((currentValue <= minValue) && !motor.clockwise) || ((currentValue >= maxValue) && motor.clockwise)) {
+            // Check for motor lock-up
+            if (preventLockUp) {
+                if (lastValue == -1) {
+              lastValue = pot.readValue();
+            }
+            else {
+              currentValue = pot.readValue();
+              int delta = (currentValue - lastValue);
+              float rateOfChange = delta / delayInterval; 
+
+              float expectedChange = 340.0 * motor.speed; // 4/3 * 255
+              // Note: this may need to account for loss in rotation speed when powered by battery 
+
+              float lockThreshold = 0.1;
+
+              lastValue = currentValue;
+            
+              if (rateOfChange / expectedChange <= lockThreshold) {
                 motor.stop();
-                isRotating = false; // Stop rotating when reaching the boundaries
+                lastValue = -1;
+                isMoving = false;
+                Serial.println("Motor stopped due to lock-up");
+              }
+            }
+            }
+           
+            // Check if motor has reached rotation limits
+            int value = pot.readValue();
+            if (((value <= minPotValue) && !motor.isClockwise) || ((value >= maxPotValue) && motor.isClockwise)) {
+                motor.stop();
+                isMoving = false; 
                 Serial.println("Rotation limit exceeded");
             }
 
-            if (!outsideUncertaintyRange(currentValue, desiredValue, stdUncertainty)) {
+            // Check if motor is within accepted range
+            if (!isOutsideRange(value, targetValue, uncertainty)) {
                 motor.stop();
-                isRotating = false;
-                motorSet = false;
+                isMoving = false;
+                speedSet = false;
                 Serial.println("Inside accepted range");
                 Serial.print("Percentage: ");
-                Serial.println(currentValue);
+                Serial.println(pot.readValue());
+                delay(500);
+                Serial.println("DelayedPercentage: ");
+                Serial.println(pot.readValue());
+                
             }
         }
     }
@@ -132,9 +178,8 @@ void clearSerialMonitor() {
     Serial.write("\033[2J\033[H"); // ANSI escape code to clear the screen and move cursor to (0,0)
 }
 
-
 // Create instances of the Motor and Potentiometer structs
-Motor motor1(8, 9, 6); //in real life circuit even numbers on Arduino and L298N are connected
+Motor motor1(8, 9, 6); // In a real-life circuit, even numbers on Arduino and L298N are connected
 Potentiometer pot1(A0);
 
 // Create an instance of the ControlledMotor class
@@ -146,16 +191,17 @@ void setup() {
 
     /*
     delay(1000);
-    motor1.setMotorSpeed(100);
-    motor1.clockwise = false;
+    motor1.setSpeed(100);
+    motor1.isClockwise = false;
     motor1.rotate();
     delay(10000);
-    motor1.setMotorSpeed(100);
-    motor1.clockwise = true;
+    motor1.setSpeed(100);
+    motor1.isClockwise = true;
     motor1.rotate();
     delay(10000);
     motor1.stop();
     */
+    
 }
 
 int outputCounter = 0;
@@ -168,7 +214,7 @@ void loop() {
         int constrainedInput = constrain(userInput, 0, 100);
 
         // Set the motor rotation angle based on the constrained input
-        motor2.setRotationAngle(constrainedInput);
+        motor2.setRotation(constrainedInput);
 
         // Increment and reset the output counter every 10 iterations
         if (++outputCounter == 10) {
@@ -181,13 +227,6 @@ void loop() {
             char c = Serial.read();
         }
     }
-
-    /*
-    Serial.print("Percentage: ");
-    Serial.print(pot1.readPot());
-    Serial.println("%");
-    */
-    
     motor2.rotate();
-}
-
+    //pot1.printData();
+};
