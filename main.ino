@@ -62,8 +62,7 @@ struct Potentiometer {
         return map(potValue, 0, 1023, 100, 0);
     }
 
-    void printData()
-    {
+    void printData() {
         Serial.print("Percentage: ");
         Serial.print(readValue());
         Serial.println("%");
@@ -79,9 +78,9 @@ struct RotationSpeedPair {
 // Define the RotationSpeedTable struct
 struct RotationSpeedTable {
 private:
-    RotationSpeedPair* table;  // Pointer to array of RotationSpeedPair
+    RotationSpeedPair* table;  // Pointer to an array of RotationSpeedPair
     int tableSize;             // Size of the array
-    bool interpolate = true; // Determines if linear interpolation between intervals is used 
+    bool interpolate = true;   // Determines if linear interpolation between intervals is used 
 
 public:
     // Constructor to initialize the RotationSpeedTable with an array
@@ -93,30 +92,28 @@ public:
         }
     }
 
+    // Method to get the motor speed based on the rotation gap
     float getSpeed(int rotationGap) {
-
         int index = 0;
         float calculatedSpeed;
 
         for (int i = 0; i < tableSize; ++i) {
-        if (rotationGap >= table[i].rotationGap) {
-        index = i;
-        if (i + 1 < tableSize - 1) {  // Corrected condition
-            break;
+            if (rotationGap >= table[i].rotationGap) {
+                index = i;
+                if (i + 1 < tableSize - 1) {
+                    break;
+                }
+            }
         }
-    }
-}
-        
+
         if (interpolate) {
             // Calculation for linear interpolation
-
             int gapDifference = table[index + 1].rotationGap - table[index].rotationGap;
             int speedDifference = table[index + 1].motorSpeed - table[index].motorSpeed;
 
             float gapRatio = static_cast<float>(rotationGap - table[index].rotationGap) / gapDifference;
 
             calculatedSpeed = gapRatio * speedDifference + table[index].motorSpeed;
-
         } else {
             calculatedSpeed = table[index].motorSpeed;
         }
@@ -130,23 +127,21 @@ public:
     }
 };
 
-
 // Define the ControlledMotor class
 class ControlledMotor {
 private:
-    Motor motor;           // Motor instance
-    Potentiometer pot;     // Potentiometer instance
-    RotationSpeedTable speedTable; // SpeedTable instance
-    int minPotValue = 5;   // Minimum potentiometer value
-    int maxPotValue = 95;  // Maximum potentiometer value
-    float uncertainty = 1.0f; // Standard uncertainty/error in the motor rotation (measured as a percentage)
-    int targetValue = 50;   // Desired potentiometer value for motor rotation
+    Motor motor;                     // Motor instance
+    Potentiometer pot;               // Potentiometer instance
+    RotationSpeedTable speedTable;   // SpeedTable instance
+    int minPotValue = 5;             // Minimum potentiometer value
+    int maxPotValue = 95;            // Maximum potentiometer value
+    float uncertainty = 1.0f;        // Standard uncertainty/error in the motor rotation (measured as a percentage)
+    int targetValue = 50;            // Desired potentiometer value for motor rotation
     bool isMoving = false;
     bool speedSet = false;
     bool preventLockUp = false;
     bool isDecaying = true;
-    
-    int delayInterval = 10; // Time delay between motor rotation checks
+    int delayInterval = 10;          // Time delay between motor rotation checks
     int lastValue = -1;
     int currentValue = -1;
 
@@ -241,7 +236,6 @@ public:
                 delay(500);
                 Serial.println("DelayedPercentage: ");
                 Serial.println(pot.readValue());
-                
             }
         }
     }
@@ -270,7 +264,6 @@ ControlledMotor motor2(motor1, pot1, speedTable);
 void setup() {
     // Setup code goes here
     Serial.begin(115200);
-
 }
 
 int outputCounter = 0;
@@ -297,4 +290,4 @@ void loop() {
         }
     }
     motor2.rotate();
-};
+}
