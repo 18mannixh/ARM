@@ -71,15 +71,16 @@ struct Potentiometer {
 
 struct ProgramTimer {
 public:
-    unsigned long timerInterval;
+    unsigned long timerInterval = 0;
     unsigned long lastMillis;
     unsigned long elapsedIntervals = 0;
 
-    ProgramTimer(unsigned long timerInterval) : timerInterval(timerInterval) {
+    ProgramTimer() {
         lastMillis = millis();
     }
 
     bool intervalElapsed() {
+        if (timerInterval != 0) {
         unsigned long currentMillis = millis();
         if (currentMillis - lastMillis >= timerInterval) {
             lastMillis = currentMillis;
@@ -87,6 +88,7 @@ public:
             return true;
         } else {
             return false;
+            }
         }
     }
 };
@@ -152,24 +154,31 @@ public:
 // Define the ControlledMotor class
 class ControlledMotor {
 private:
-    Motor motor;                     // Motor instance
-    Potentiometer pot;               // Potentiometer instance
-    RotationSpeedTable speedTable;   // SpeedTable instance
-    int minPotValue = 5;             // Minimum potentiometer value
-    int maxPotValue = 95;            // Maximum potentiometer value
-    float uncertainty = 0.0f;        // Standard uncertainty/error in the motor rotation (measured as a percentage)
-    float targetValue = 50.0;        // Desired potentiometer value for motor rotation
+    Motor motor;                             // Motor instance
+    Potentiometer pot;                       // Potentiometer instance
+    RotationSpeedTable speedTable;          // SpeedTable instance
+    ProgramTimer timer;                     // ProgramTimer instance
+    int minPotValue = 5;                    // Minimum potentiometer value
+    int maxPotValue = 95;                   // Maximum potentiometer value
+    float uncertainty = 0.0f;               // Standard uncertainty/error in the motor rotation (measured as a percentage)
+    float targetValue = 50.0;              // Desired potentiometer value for motor rotation
     bool isMoving = false;
-    bool speedSet = false;
+    bool motorSet = false;
     bool preventLockUp = false;
+    int maxLockTime = 1000;
+    int lockTime = 0;
+    int speedBoost = 10;                    // Boosts motor speed when 'catching'. Set to -1 to disable. Only works with variable motor speed. 
     bool isDecaying = true;
-    int delayInterval = 10;          // Time delay between motor rotation checks
     int lastValue = -1;
     int currentValue = -1;
+    bool collectingData = true;
+    bool isBoosting = false;
+
+    bool setAngleRotation = false; 
 
 public:
     // Modified constructor to include RotationSpeedTable parameter
-    ControlledMotor(const Motor& m, const Potentiometer& p, const RotationSpeedTable& speedTable, float uncertainty = 0.0f, int min = 5, int max = 95)
+    ControlledMotor(const Motor& m, const Potentiometer& p, const RotationSpeedTable& speedTable, bool rotationMode = false, float uncertainty = 0.0f, int min = 5, int max = 95)
         : motor(m), pot(p), speedTable(speedTable), uncertainty(uncertainty), minPotValue(min), maxPotValue(max) {
     }
 
@@ -184,45 +193,89 @@ public:
         float value = pot.readValue();
         if (isOutsideRange(value, targetValue, uncertainty)) {
             isMoving = true;
-            speedSet = false;
+            motorSet = false;
         }
     }
 
     // Method to set the motor rotation direction and start the motor
     void moveMotor(float target) {
-        motor.isClockwise = pot.readValue() < target;
+        if (setAngleRotation) {
+            motor.isClockwise = pot.readValue() < target;
+        }
+        else
+        {
+            if (target == minPotValue) {
+                motor.isClockwise = false;
+            }
+            else if (target == maxPotValue) {
+                motor.isClockwise = true; 
+            }
+        }
         motor.rotate();
-        speedSet = true;
+        motorSet = true;
     }
 
     // Main method to control motor rotation
     void rotate() {
         if (isMoving) {
-            if (!speedSet) {
+            if (!motorSet) {
                 moveMotor(targetValue);
             }
 
-            // Check for motor lock-up
-            if (preventLockUp) {
-                if (lastValue == -1) {
+
+            // Check for lockups / motor 'catching' 
+            if (preventLockUp || speedBoost != -1) {
+                if (lastValue == -1)
+                {
                     lastValue = pot.readValue();
+                    timer.timerInterval = 250;
+                    
                 } else {
-                    currentValue = pot.readValue();
-                    int delta = (currentValue - lastValue);
-                    float rateOfChange = delta / delayInterval;
+                    if (timer.intervalElapsed()) {
+                        currentValue = pot.readValue();
 
-                    float expectedChange = 340.0 * motor.speed; // 4/3 * 255
-                    // Note: this may need to account for the loss in rotation speed when powered by a battery 
+                        float delta = abs(currentValue - lastValue);
+                        float rateOfChange = 1000 * delta / timer.timerInterval;
 
-                    float lockThreshold = 0.1;
 
-                    lastValue = currentValue;
+                        float expectedChange = 5.0f * motor.speed / 17.0f; // NOTE: this may need to be changed when the battery is powering the load due to voltage induced speed differences
 
-                    if (rateOfChange / expectedChange <= lockThreshold) {
-                        motor.stop();
-                        lastValue = -1;
-                        isMoving = false;
-                        Serial.println("Motor stopped due to lock-up");
+                        
+                        Serial.print("Interval: ");
+                        Serial.print(timer.elapsedIntervals);
+                        Serial.print(" RateOfChange: ");
+                        Serial.print(rateOfChange);
+                        Serial.print(" ExpectedChange: ");
+                        Serial.println(expectedChange);
+                        
+
+                        float changeRatio = rateOfChange / expectedChange;
+
+                        if (changeRatio <= 0.1f) {
+                            if (preventLockUp) {
+                                lockTime += timer.timerInterval;
+                                if (lockTime >= maxLockTime * (1.5f - motor.speed / 255.0f)) {
+                                    motor.stop();
+                                    lastValue = -1;
+                                    isMoving = false;
+                                    motorSet = false;
+                                    lockTime = 0;
+                                    Serial.println("Motor stopped due to lock-up");
+                                }
+                            }
+                        } 
+
+                        if (changeRatio <= 0.5f) {
+                            if (speedBoost != -1) {
+                                isBoosting = true; 
+                            }
+                        } else {
+                            lockTime = 0;
+                            isBoosting = false;
+                        }
+
+                        lastValue = currentValue;
+                    
                     }
                 }
             }
@@ -231,6 +284,9 @@ public:
             if (isDecaying) {
                 float difference = abs(pot.readValue() - targetValue);
                 int speed = speedTable.getSpeed(difference);
+                if (isBoosting) {
+                    speed += speedBoost;
+                }
                 motor.setSpeed(speed);
             }
 
@@ -239,21 +295,27 @@ public:
             if (((value <= minPotValue) && !motor.isClockwise) || ((value >= maxPotValue) && motor.isClockwise)) {
                 motor.stop();
                 isMoving = false;
+                motorSet = false;
+                Serial.println(value);
                 Serial.println("Rotation limit exceeded");
             }
 
             // Check if the motor is within the accepted range
-            if (!isOutsideRange(value, targetValue, uncertainty)) {
-                motor.stop();
-                isMoving = false;
-                speedSet = false;
-                Serial.println("Inside accepted range");
-                Serial.print("Percentage: ");
-                Serial.println(pot.readValue());
-                delay(500);
-                Serial.println("DelayedPercentage: ");
-                Serial.println(pot.readValue());
+            if (setAngleRotation) {
+
+                if (!isOutsideRange(value, targetValue, uncertainty)) {
+                    motor.stop();
+                    isMoving = false;
+                    motorSet = false;
+                    Serial.println("Inside accepted range");
+                    Serial.print("Percentage: ");
+                    Serial.println(pot.readValue());
+                    delay(500);
+                    Serial.println("DelayedPercentage: ");
+                    Serial.println(pot.readValue());
             }
+            }
+
         }
     }
 };
@@ -268,7 +330,7 @@ Potentiometer pot1(A0);
 
 // Create a speed table
 RotationSpeedPair speedPairs[] = {
-    {0, 40},
+    {0, 45},
     {40, 180},
     {80, 255},
     {100, 255},
@@ -278,13 +340,13 @@ int numberOfPairs = sizeof(speedPairs) / sizeof(speedPairs[0]);
 RotationSpeedTable speedTable(speedPairs, numberOfPairs, true);
 
 // Create an instance of the ControlledMotor class with the speed table
-ControlledMotor motor2(motor1, pot1, speedTable);
-
-ProgramTimer timer(1000);
+ControlledMotor motor2(motor1, pot1, speedTable, true);
 
 void setup() {
     // Setup code goes here
     Serial.begin(115200);
+
+    motor2.setRotation(100.0f);
 }
 
 int outputCounter = 0;
@@ -310,11 +372,9 @@ void loop() {
             char c = Serial.read();
         }
     }
+
     motor2.rotate();
-    /*
-    if (timer.intervalElapsed()) {
-        Serial.print("Intervals elapsed: ");
-        Serial.println(timer.elapsedIntervals);
-    }
-    */
 }
+
+
+//CHANGE ALL SETROTATIONANGLE STUFF TO USE A CONSTRUCTOR THAT TAKES DIFFERENT TYPES
