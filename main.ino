@@ -158,9 +158,10 @@ struct MotorControlParameters {
     int minPotValue;
     int maxPotValue;
     float rotationUncertainty;
-    int maxLockDuration;
-    int speedBoostAmount;
+    int maxLockDuration; // -1 for disable
+    int speedBoostAmount; // -1 for disable
     bool isDecaying;
+    bool preciseRotation;
 };
 
 // Define the ControlledMotor class
@@ -178,6 +179,7 @@ private:
     int maxLockDuration;
     int speedBoostAmount;
     bool isDecaying;
+    bool preciseRotation;
 
     float targetValue = 50.0;               // Desired potentiometer value for motor rotation
     bool isMoving = false;
@@ -192,7 +194,7 @@ public:
     ControlledMotor(const Motor& m, const Potentiometer& p, const RotationSpeedTable& st, const MotorControlParameters& params)
         : motor(m), pot(p), speedTable(st), minPotValue(params.minPotValue), maxPotValue(params.maxPotValue),
           rotationUncertainty(params.rotationUncertainty), maxLockDuration(params.maxLockDuration),
-          speedBoostAmount(params.speedBoostAmount), isDecaying(params.isDecaying) {
+          speedBoostAmount(params.speedBoostAmount), isDecaying(params.isDecaying), preciseRotation(params.preciseRotation) {
     }
 
     // Method to check if the value is within the uncertainty range
@@ -316,6 +318,10 @@ public:
                     Serial.println(pot.readValue());
                 }
             }
+
+            if (preciseRotation) {
+
+            }
         }
     }
 };
@@ -323,6 +329,49 @@ public:
 void clearSerialMonitor() {
     Serial.write("\033[2J\033[H"); // ANSI escape code to clear the screen and move cursor to (0,0)
 }
+
+struct Button {
+
+};
+
+class Wrist {
+    private: 
+    Button input1;
+    Button input2;
+    ControlledMotor motor;
+
+    void rotateToNormal() {
+
+    }
+
+    void rotate(bool clockwise) {
+
+    }
+
+    void loop() {
+
+    }
+
+};
+
+class Hand {
+    private:
+    Button input1;
+    Button input2; 
+    ControlledMotor motor; 
+
+    void closeHand() {
+
+    }
+
+    void openHand() {
+
+    }
+
+    void loop() { 
+
+    }
+};
 
 // Create instances of the Motor and Potentiometer structs
 Motor motor1(8, 9, 6); // In a real-life circuit, even numbers on Arduino and L298N are connected
@@ -347,6 +396,7 @@ MotorControlParameters motorParams = {
     .maxLockDuration = 3000,
     .speedBoostAmount = 10,
     .isDecaying = true,
+    .preciseRotation = false,
 };
 
 // Create an instance of the ControlledMotor class with the speed table and parameters
