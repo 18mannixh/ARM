@@ -1,4 +1,4 @@
-#include <Arduino.h>
+/*#include <Arduino.h>
 
 // Define the Motor struct
 struct Motor {
@@ -461,64 +461,17 @@ class Hand {
 
 };
 
-// Create instances of the Motor and Potentiometer structs
-Motor motor1(8, 9, 6); // In a real-life circuit, even numbers on Arduino and L298N are connected
-Potentiometer pot1(A0);
-
-// Create a speed table
-RotationSpeedPair speedPairs[] = {
-    {0, 45},
-    {40, 180},
-    {80, 255},
-    {100, 255},
-};
-
-int numberOfPairs = sizeof(speedPairs) / sizeof(speedPairs[0]);
-RotationSpeedTable speedTable(speedPairs, numberOfPairs, true);
-
-// Define motor control parameters
-MotorControlParameters motorParams = {
-    .minPotValue = 5,
-    .maxPotValue = 95,
-    .rotationUncertainty = 0.0f,
-    .maxLockDuration = 3000,
-    .speedBoostAmount = 10,
-    .isDecaying = true,
-    .preciseRotation = false,
-};
-
-// Create an instance of the ControlledMotor class with the speed table and parameters
-ControlledMotor motor2(motor1, pot1, speedTable, motorParams);
+Button button1(2);
 
 void setup() {
     // Setup code goes here
     Serial.begin(115200);
 }
 
-int outputCounter = 0;
-
-void loop() {
-    // Check for incoming Serial data
-    if (Serial.available() > 0) {
-        // Read and constrain the user input to a range of 0 to 100
-        int userInput = Serial.parseInt();
-        float constrainedInput = constrain(userInput, 0, 100);
-
-        // Set the motor rotation angle based on the constrained input
-        motor2.setRotation(constrainedInput);
-
-        // Increment and reset the output counter every 10 iterations
-        if (++outputCounter == 10) {
-            clearSerialMonitor();
-            outputCounter = 0;
-        }
-
-        // Clear any remaining characters in the Serial buffer
-        while (Serial.available() > 0) {
-            char c = Serial.read();
-        }
-    }
-
-    motor2.rotate();
+void loop()
+{
+    button1.readButton();
+    Serial.println(button1.getPressDuration());
 }
 
+*/
