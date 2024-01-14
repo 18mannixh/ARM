@@ -21,11 +21,11 @@ struct Motor {
     // Method to rotate the motor in the specified direction
     void rotate() {
         if (isClockwise) {
-            digitalWrite(inputPin1, HIGH);
-            digitalWrite(inputPin2, LOW);
-        } else {
             digitalWrite(inputPin1, LOW);
             digitalWrite(inputPin2, HIGH);
+        } else {
+            digitalWrite(inputPin1, HIGH);
+            digitalWrite(inputPin2, LOW);
         }
     }
 
@@ -82,8 +82,7 @@ public:
     }
 
     void reset () {
-      currentMillis = millis();
-      lastMillis = currentMillis;
+      lastMillis = millis();
       elapsedIntervals = 0;
     }
 
@@ -170,7 +169,7 @@ struct MotorControlParameters {
     int maxLockDuration; // -1 for disable
     int speedBoostAmount; // -1 for disable
     bool isDecaying;
-    bool preciseRotation;
+    int maxPrecisionResets; // -1 for disable
 };
 
 // Define the ControlledMotor class
@@ -192,7 +191,7 @@ public:
     int maxLockDuration;
     int speedBoostAmount;
     bool isDecaying;
-    bool preciseRotation;
+    int maxPrecisionResets;
 
     bool setAngleRotation = false;
     float targetValue = 50.0;               // Desired potentiometer value for motor rotation
@@ -203,12 +202,13 @@ public:
     int currentValue = -1;
     bool isBoosting = false;
     bool rotationCheck = false;
+    int precisionResets; 
 
     // Modified constructor to include RotationSpeedTable parameter and user-changeable parameters
     ControlledMotor(const Motor& m, const Potentiometer& p, const RotationSpeedTable& st, const MotorControlParameters& params)
         : motor(m), pot(p), speedTable(st), minPotValue(params.minPotValue), maxPotValue(params.maxPotValue),
           rotationUncertainty(params.rotationUncertainty), maxLockDuration(params.maxLockDuration),
-          speedBoostAmount(params.speedBoostAmount), isDecaying(params.isDecaying), preciseRotation(params.preciseRotation) {
+          speedBoostAmount(params.speedBoostAmount), isDecaying(params.isDecaying), maxPrecisionResets(params.maxPrecisionResets) {
             
             lockUpTimer.timerInterval = 250;
             preciseRotationTimer.timerInterval= 500;
@@ -225,7 +225,7 @@ public:
         setAngleRotation = true;
         targetValue = constrain(angle, minPotValue, maxPotValue);
         float value = pot.readValue();
-        motor.isClockwise = value > targetValue;
+        motor.isClockwise = value < targetValue;
 
         if (isOutsideRange(value, targetValue, rotationUncertainty)) {
             isMoving = true;
@@ -236,6 +236,7 @@ public:
       motor.stop();
       isMoving = false;
       setAngleRotation = false;
+      precisionResets = 0;
     }
 
     void startMotor() {
@@ -248,22 +249,20 @@ public:
         motorSet = false;
 
         motor.isClockwise = clockwise;
+        float value = pot.readValue();
 
         if (clockwise) {
             targetValue = maxPotValue;
+            if (value < targetValue) {
+                isMoving = true;
+            }
         } else {
             targetValue = minPotValue;
-        }
-
-        float value = pot.readValue();
-        if (isOutsideRange(value, targetValue, rotationUncertainty)) {
-            isMoving = true;
+            if (value > targetValue) {
+                isMoving = true; 
+            }
         }
     }
-
-
-
-    
 
     // Main method to control motor rotation
     void rotate() {
@@ -272,6 +271,7 @@ public:
                 startMotor();
             }
             // Check for lockups / motor 'catching'
+            if (!rotationCheck) {
             if (maxLockDuration != -1 || speedBoostAmount != -1) {
                 if (lastValue == -1) {
                     lastValue = pot.readValue();
@@ -319,7 +319,7 @@ public:
                     }
                 }
             }
-
+            }
             // Decay the speed of rotation using PWM
             if (isDecaying) {
                 float difference = abs(pot.readValue() - targetValue);
@@ -339,9 +339,9 @@ public:
             }
 
             // Check if the motor is within the accepted range
-            if (setAngleRotation) {
+            if (setAngleRotation && !rotationCheck) {
                 if (!isOutsideRange(value, targetValue, rotationUncertainty)) {
-                    if (preciseRotation) {
+                    if (maxPrecisionResets != -1 && precisionResets != maxPrecisionResets) {
                         motor.stop();
                         preciseRotationTimer.reset();
                         rotationCheck = true;
@@ -358,19 +358,18 @@ public:
                     */
                    }
                 }
-            
-
-          
-            if (preciseRotation) {
+            if (maxPrecisionResets != -1) {
               if (rotationCheck == true) {
                 if (preciseRotationTimer.interval()) {
                     
                     float delayedValue = pot.readValue();
                     if (isOutsideRange(delayedValue, targetValue, rotationUncertainty)) {
                         setRotation(targetValue);
+                        precisionResets++;
                         Serial.println("ResetTarget");
                     } else {
                     stopMotor();
+                    Serial.println("preciseRotation ended");
                     }
                     rotationCheck = false;
                 }
@@ -469,15 +468,17 @@ class Wrist {
         .maxLockDuration = -1,
         .speedBoostAmount = 10,
         .isDecaying = true,
-        .preciseRotation = true,
+        .maxPrecisionResets = 3,
     };
 
     ControlledMotor motor{motor1, pot1, speedTable, motorParams};
+
     
     public: 
-    
     void loop() {
-
+    
+        pot1.printData();
+    
       bool b1state = input1.readButton();
       bool b2state = input2.readButton();
       int b1duration = input1.getPressDuration();
@@ -523,6 +524,7 @@ Wrist wrist;
 void loop() {
 
     wrist.loop();
+
     /*
     // Check for incoming Serial data
     if (Serial.available() > 0) {
