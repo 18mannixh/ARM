@@ -82,14 +82,14 @@ public:
     }
 
     void reset () {
-      lastMillis = millis();
-      elapsedIntervals = 0;
+        lastMillis = millis();
+        elapsedIntervals = 0;
     }
 
     // Method to check if the specified timer interval has elapsed
     bool interval() {
         if (timerInterval != 0) {
-           currentMillis = millis();
+            currentMillis = millis();
             if (currentMillis - lastMillis >= timerInterval) {
                 elapsedIntervals += (currentMillis - lastMillis) / timerInterval;
                 lastMillis = currentMillis;
@@ -99,8 +99,6 @@ public:
             }
         }
     }
-
-
 };
 
 // Define the RotationSpeedPair struct
@@ -170,17 +168,15 @@ struct MotorControlParameters {
     int speedBoostAmount; // -1 for disable
     bool isDecaying;
     int maxPrecisionResets; // -1 for disable
+    int motorEffectiveRPM;
 };
 
 // Define the ControlledMotor class
 class ControlledMotor {
-
 public:
-
     Motor motor;                             // Motor instance
     Potentiometer pot;                       // Potentiometer instance
     RotationSpeedTable speedTable;           // SpeedTable instance
-    
     ProgramTimer lockUpTimer;                      // ProgramTimer instance
     ProgramTimer preciseRotationTimer;
 
@@ -192,6 +188,7 @@ public:
     int speedBoostAmount;
     bool isDecaying;
     int maxPrecisionResets;
+    int motorEffectiveRPM;
 
     bool setAngleRotation = false;
     float targetValue = 50.0;               // Desired potentiometer value for motor rotation
@@ -202,13 +199,13 @@ public:
     int currentValue = -1;
     bool isBoosting = false;
     bool rotationCheck = false;
-    int precisionResets; 
+    int precisionResets = 0;
 
     // Modified constructor to include RotationSpeedTable parameter and user-changeable parameters
     ControlledMotor(const Motor& m, const Potentiometer& p, const RotationSpeedTable& st, const MotorControlParameters& params)
         : motor(m), pot(p), speedTable(st), minPotValue(params.minPotValue), maxPotValue(params.maxPotValue),
           rotationUncertainty(params.rotationUncertainty), maxLockDuration(params.maxLockDuration),
-          speedBoostAmount(params.speedBoostAmount), isDecaying(params.isDecaying), maxPrecisionResets(params.maxPrecisionResets) {
+          speedBoostAmount(params.speedBoostAmount), isDecaying(params.isDecaying), maxPrecisionResets(params.maxPrecisionResets), motorEffectiveRPM(params.maxPrecisionResets) {
             
             lockUpTimer.timerInterval = 250;
             preciseRotationTimer.timerInterval= 500;
@@ -233,10 +230,12 @@ public:
     }
 
     void stopMotor() {
-      motor.stop();
-      isMoving = false;
-      setAngleRotation = false;
-      precisionResets = 0;
+        motor.stop();
+        isMoving = false;
+        setAngleRotation = false;
+        precisionResets = 0;
+        lockTime = 0;
+        lastValue = -1;
     }
 
     void startMotor() {
@@ -247,6 +246,7 @@ public:
     // Overloaded method to set motor rotation direction without specifying an angle
     void setRotation(bool clockwise) {
         motorSet = false;
+        setAngleRotation = false;
 
         motor.isClockwise = clockwise;
         float value = pot.readValue();
@@ -272,53 +272,44 @@ public:
             }
             // Check for lockups / motor 'catching'
             if (!rotationCheck) {
-            if (maxLockDuration != -1 || speedBoostAmount != -1) {
-                if (lastValue == -1) {
-                    lastValue = pot.readValue();
-                } else {
-                    if (lockUpTimer.interval()) {
-                        currentValue = pot.readValue();
+                if (maxLockDuration != -1 || speedBoostAmount != -1) {
+                    if (lastValue == -1) {
+                        lastValue = pot.readValue();
+                    } else {
+                        if (lockUpTimer.interval()) {
+                            currentValue = pot.readValue();
 
-                        float delta = abs(currentValue - lastValue);
-                        float rateOfChange = 1000 * delta / lockUpTimer.timerInterval;
+                            float delta = abs(currentValue - lastValue);
+                            float rateOfChange = 1000 * delta / lockUpTimer.timerInterval; 
+    
+                            // expectedChange = (100.0f*motor.rotationSpeed/255.0f) * (motorEffectiveRPM/60) * (3.0f/4.0f);
+                            float expectedChange = (motor.rotationSpeed * motorEffectiveRPM / 204.0f);
 
-                        float expectedChange = 5.0f * motor.rotationSpeed / 17.0f;
-                        /*
-                        Serial.print("Interval: ");
-                        Serial.print(lockUpTimer.elapsedIntervals);
-                        Serial.print(" RateOfChange: ");
-                        Serial.print(rateOfChange);
-                        Serial.print(" ExpectedChange: ");
-                        Serial.println(expectedChange);
-                        */
+                            float changeRatio = rateOfChange / expectedChange;
 
-                        float changeRatio = rateOfChange / expectedChange;
-
-                        if (changeRatio <= 0.1f) {
-                            if (maxLockDuration != -1) {
-                                lockTime += lockUpTimer.timerInterval;
-                                if (lockTime >= maxLockDuration * (1.5f - motor.rotationSpeed / 255.0f)) {
-                                    stopMotor();
-                                    lastValue = -1;
-                                    lockTime = 0;
-                                    Serial.println("Motor stopped due to lock-up");
+                            if (changeRatio <= 0.1f) {
+                                if (maxLockDuration != -1) {
+                                    lockTime += lockUpTimer.timerInterval;
+                                    if (lockTime >= maxLockDuration * (1.5f - motor.rotationSpeed / 255.0f)) {
+                                        stopMotor();
+                                        Serial.println("Motor stopped due to lock-up");
+                                    }
                                 }
                             }
-                        }
 
-                        if (changeRatio <= 0.5f) {
-                            if (speedBoostAmount != -1) {
-                                isBoosting = true;
+                            if (changeRatio <= 0.5f) {
+                                if (speedBoostAmount != -1) {
+                                    isBoosting = true;
+                                }
+                            } else {
+                                lockTime = 0;
+                                isBoosting = false;
                             }
-                        } else {
-                            lockTime = 0;
-                            isBoosting = false;
-                        }
 
-                        lastValue = currentValue;
+                            lastValue = currentValue;
+                        }
                     }
                 }
-            }
             }
             // Decay the speed of rotation using PWM
             if (isDecaying) {
@@ -335,7 +326,7 @@ public:
             if (((value <= minPotValue) && !motor.isClockwise) || ((value >= maxPotValue) && motor.isClockwise)) {
                 stopMotor();
                 Serial.println(value);
-                Serial.println("Rotation limit exceeded");
+                //Serial.println("Rotation limit exceeded");
             }
 
             // Check if the motor is within the accepted range
@@ -349,32 +340,22 @@ public:
                     else {
                         stopMotor();
                     }
-                    /*Serial.println("Inside accepted range");
-                    Serial.print("Percentage: ");
-                    Serial.println(pot.readValue());
-                    delay(500);
-                    Serial.println("DelayedPercentage: ");
-                    Serial.println(pot.readValue());
-                    */
-                   }
                 }
+            }
             if (maxPrecisionResets != -1) {
-              if (rotationCheck == true) {
-                if (preciseRotationTimer.interval()) {
-                    
-                    float delayedValue = pot.readValue();
-                    if (isOutsideRange(delayedValue, targetValue, rotationUncertainty)) {
-                        setRotation(targetValue);
-                        precisionResets++;
-                        Serial.println("ResetTarget");
-                    } else {
-                    stopMotor();
-                    Serial.println("preciseRotation ended");
+                if (rotationCheck == true) {
+                    if (preciseRotationTimer.interval()) {
+                        
+                        float delayedValue = pot.readValue();
+                        if (isOutsideRange(delayedValue, targetValue, rotationUncertainty)) {
+                            setRotation(targetValue);
+                            precisionResets++;
+                        } else {
+                            stopMotor();
+                        }
+                        rotationCheck = false;
                     }
-                    rotationCheck = false;
                 }
-              }
-
             }
         }
     }
@@ -386,54 +367,51 @@ void clearSerialMonitor() {
 
 struct Button {
 
-  int digitalInputPin;
-  ProgramTimer debounceTimer;
-  ProgramTimer pressTimer;
-  bool currentState = LOW;
-  bool lastState = LOW;
-  bool outputState = LOW;
+    int digitalInputPin;
+    ProgramTimer debounceTimer;
+    ProgramTimer pressTimer;
+    bool currentState = LOW;
+    bool lastState = LOW;
+    bool outputState = LOW;
 
-  // Constructor to initialize the Button
-  Button(int digitalInputPin) : digitalInputPin(digitalInputPin) {
-    pinMode(digitalInputPin, INPUT);
-    debounceTimer.timerInterval = 10;
-    pressTimer.timerInterval = 5;
-  }
-
-  // Method to read the button state and handle debouncing
-  bool readButton() {
-
-    currentState = digitalRead(digitalInputPin);
-
-    // Check if the button state has changed
-    if (currentState != lastState) {
-      // Button is released (transition from HIGH to LOW)
-      if (currentState == LOW) {
-        debounceTimer.reset(); // Reset the timer when button is released
-        lastState = currentState;
-        outputState = LOW;
-      }
-      // Button is pressed (transition from LOW to HIGH)
-      else if (currentState == HIGH) {
-        // Check if the timer interval has elapsed (debounce)
-        if (debounceTimer.interval()) {
-            pressTimer.reset();
-            lastState = currentState;
-            outputState = HIGH;
-        }
-      }
+    // Constructor to initialize the Button
+    Button(int digitalInputPin) : digitalInputPin(digitalInputPin) {
+        pinMode(digitalInputPin, INPUT);
+        debounceTimer.timerInterval = 10;
+        pressTimer.timerInterval = 5;
     }
-    return outputState;
-  }
 
-  // Returns the time the button has been pressed for in milliseconds
-    int getPressDuration() {
-        if (outputState == LOW)
-        {
-            return 0;
+    // Method to read the button state and handle debouncing
+    bool readButton() {
+
+        currentState = digitalRead(digitalInputPin);
+
+        // Check if the button state has changed
+        if (currentState != lastState) {
+            // Button is released (transition from HIGH to LOW)
+            if (currentState == LOW) {
+                debounceTimer.reset(); // Reset the timer when button is released
+                lastState = currentState;
+                outputState = LOW;
+            }
+            // Button is pressed (transition from LOW to HIGH)
+            else if (currentState == HIGH) {
+                // Check if the timer interval has elapsed (debounce)
+                if (debounceTimer.interval()) {
+                    pressTimer.reset();
+                    lastState = currentState;
+                    outputState = HIGH;
+                }
+            }
         }
-        else if (outputState == HIGH) 
-        {
+        return outputState;
+    }
+
+    // Returns the time the button has been pressed for in milliseconds
+    int getPressDuration() {
+        if (outputState == LOW) {
+            return 0;
+        } else if (outputState == HIGH) {
             pressTimer.interval();
             return pressTimer.elapsedIntervals * pressTimer.timerInterval;
         }
@@ -441,113 +419,161 @@ struct Button {
 };
 
 class Wrist {
-    private:
+private:
+  Button input1 = Button(2); // leftmost button
+  Button input2 = Button(3); // rightmost button
 
-    Button input1 = Button(2); // leftmost button
-    Button input2 = Button(3); // rightmost button
+  bool lastb1State = false;
+  bool lastb2State = false;
 
-    bool lastb1State = false;
-    bool lastb2State = false; 
+  Motor motor1{8, 9, 6}; // In a real-life circuit, even numbers on Arduino and L298N are connected
+  Potentiometer pot1{A0};
 
-    Motor motor1{8, 9, 6}; // In a real-life circuit, even numbers on Arduino and L298N are connected
-    Potentiometer pot1{A0};
+  RotationSpeedPair speedPairs[4] = {
+      {0, 255},
+      {40, 255},
+      {80, 255},
+      {100, 255},
+  };
 
-    RotationSpeedPair speedPairs[4] = {
-        {0, 255},
-        {40, 255},
-        {80, 255},
-        {100, 255},
-    };
+  int numberOfPairs = sizeof(speedPairs) / sizeof(speedPairs[0]);
+  RotationSpeedTable speedTable{speedPairs, numberOfPairs, true};
+  MotorControlParameters motorParams = {
+      .minPotValue = 5,
+      .maxPotValue = 95,
+      .rotationUncertainty = 0.0f,
+      .maxLockDuration = -1,
+      .speedBoostAmount = 10,
+      .isDecaying = true,
+      .maxPrecisionResets = 3,
+      .motorEffectiveRPM = 30,
+  };
 
-    int numberOfPairs = sizeof(speedPairs) / sizeof(speedPairs[0]);
-    RotationSpeedTable speedTable{speedPairs, numberOfPairs, true};
-    MotorControlParameters motorParams = {
-        .minPotValue = 5,
-        .maxPotValue = 95,
-        .rotationUncertainty = 0.0f,
-        .maxLockDuration = -1,
-        .speedBoostAmount = 10,
-        .isDecaying = true,
-        .maxPrecisionResets = 3,
-    };
+  ControlledMotor motor{motor1, pot1, speedTable, motorParams};
 
-    ControlledMotor motor{motor1, pot1, speedTable, motorParams};
+public:
+  void loop() {
+    pot1.printData();
 
-    
-    public: 
-    void loop() {
-    
-        pot1.printData();
-    
-      bool b1state = input1.readButton();
-      bool b2state = input2.readButton();
-      int b1duration = input1.getPressDuration();
-      int b2duration = input2.getPressDuration();
+    bool b1state = input1.readButton();
+    bool b2state = input2.readButton();
+    int b1duration = input1.getPressDuration();
+    int b2duration = input2.getPressDuration();
 
-      if (((b1state != lastb1State) || (b2state != lastb2State)) &&  !motor.setAngleRotation) {
-        if (b1state == HIGH && b2state == LOW) {
-          Serial.println("AntiClockwise");
-          motor.setRotation(false);
-        }
-        if (b1state == LOW && b2state == HIGH) {
-          Serial.println("Clockwise");
-          motor.setRotation(true);
-        }
-        if (b1state == b2state) {
-          Serial.println("Low");
-          motor.stopMotor();
-        }
-        lastb1State = b1state;
-        lastb2State = b2state;
+    if (((b1state != lastb1State) || (b2state != lastb2State)) && !motor.setAngleRotation) {
+      if (b1state == HIGH && b2state == LOW) {
+        Serial.println("AntiClockwise");
+        motor.setRotation(false);
       }
-      
-      if (b1state == HIGH && b2state == HIGH && !motor.setAngleRotation) {
-        int holdDuration = 4000;
-        if (b1duration >= holdDuration && b2duration >= holdDuration)
-        {
-          float normalAngle = 50.0f;
-          motor.setRotation(normalAngle);
-          Serial.println("Set Rotation");
-        }   
+      if (b1state == LOW && b2state == HIGH) {
+        Serial.println("Clockwise");
+        motor.setRotation(true);
       }
-      motor.rotate();
+      if (b1state == b2state) {
+        Serial.println("Low");
+        motor.stopMotor();
+      }
+      lastb1State = b1state;
+      lastb2State = b2state;
     }
+
+    if (b1state == HIGH && b2state == HIGH && !motor.setAngleRotation) {
+      int holdDuration = 4000;
+      if (b1duration >= holdDuration && b2duration >= holdDuration) {
+        float normalAngle = 50.0f;
+        motor.setRotation(normalAngle);
+        Serial.println("Set Rotation");
+      }
+    }
+    motor.rotate();
+  }
+};
+
+class Hand {
+private:
+  Button input3 = Button(2); // leftmost button
+  Button input4 = Button(3); // rightmost button
+
+  bool lastb3State = false;
+  bool lastb4State = false;
+
+  bool latch = false;
+  bool opening = true;
+
+  Motor motor2{8, 9, 6}; // In a real-life circuit, even numbers on Arduino and L298N are connected
+  Potentiometer pot2{A0};
+
+  RotationSpeedPair speedPairs[4] = {
+      {0, 255},
+      {40, 255},
+      {80, 255},
+      {100, 255},
+  };
+
+  int numberOfPairs = sizeof(speedPairs) / sizeof(speedPairs[0]);
+
+  RotationSpeedTable speedTable{speedPairs, numberOfPairs, true};
+  MotorControlParameters motorParams = {
+      .minPotValue = 5,
+      .maxPotValue = 95,
+      .rotationUncertainty = 0.0f,
+      .maxLockDuration = 4000,
+      .speedBoostAmount = 10,
+      .isDecaying = true,
+      .maxPrecisionResets = 3,
+      .motorEffectiveRPM = 30,
+  };
+
+  ControlledMotor motor{motor2, pot2, speedTable, motorParams};
+
+public:
+  void loop() {
+    bool b3state = input3.readButton();
+    bool b4state = input4.readButton();
+    int b3duration = input3.getPressDuration();
+    int b4duration = input4.getPressDuration();
+
+    if (b4state != lastb4State) {
+      if (b4state && !opening) {
+        latch = !latch;
+      }
+      lastb4State = b4state;
+    }
+
+    if (b3state != lastb3State) {
+      if (!latch) {
+        if (!b3state) {
+          float openFingersAngle = 25.0f;
+          motor.stopMotor();
+          motor.setRotation(openFingersAngle);
+          opening = true;
+        } else {
+          motor.stopMotor();
+          motor.setRotation(true);
+          opening = false;
+        }
+      }
+      lastb3State = b3state;
+    }
+    if (!opening) {
+      if (latch) {
+        motor.stopMotor();
+      }
+    }
+
+    motor.rotate();
+  }
 };
 
 void setup() {
-    // Setup code goes here
-    Serial.begin(115200);
+  // Setup code goes here
+  Serial.begin(115200);
 }
 
-Wrist wrist;
+Hand hand;
+//Wrist wrist;
 
 void loop() {
-
-    wrist.loop();
-
-    /*
-    // Check for incoming Serial data
-    if (Serial.available() > 0) {
-        // Read and constrain the user input to a range of 0 to 100
-        int userInput = Serial.parseInt();
-        float constrainedInput = constrain(userInput, 0, 100);
-
-        // Set the motor rotation angle based on the constrained input
-        motor2.setRotation(constrainedInput);
-
-        // Increment and reset the output counter every 10 iterations
-        if (++outputCounter == 10) {
-            clearSerialMonitor();
-            outputCounter = 0;
-        }
-
-        // Clear any remaining characters in the Serial buffer
-        while (Serial.available() > 0) {
-            char c = Serial.read();
-        }
-    }
-
-    motor2.rotate();
-    */
-
+  hand.loop();
+  //wrist.loop();
 }
