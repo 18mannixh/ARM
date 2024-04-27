@@ -1,5 +1,6 @@
 #include <Arduino.h>
- 
+#include <avr/power.h>
+
 // Define the Motor struct
 struct Motor {
     int inputPin1;                // Input 1 on the L298N
@@ -179,6 +180,7 @@ public:
     RotationSpeedTable speedTable;           // SpeedTable instance
     ProgramTimer lockUpTimer;                      // ProgramTimer instance
     ProgramTimer preciseRotationTimer;
+    ProgramTimer systemCheckTimer; 
  
     // User-changeable parameters
     int minPotValue;
@@ -189,6 +191,7 @@ public:
     bool isDecaying;
     int maxPrecisionResets;
     int motorEffectiveRPM;
+    bool systemCheck = false; 
  
     bool setAngleRotation = false;
     float targetValue = 50.0;               // Desired potentiometer value for motor rotation
@@ -208,7 +211,26 @@ public:
           speedBoostAmount(params.speedBoostAmount), isDecaying(params.isDecaying), maxPrecisionResets(params.maxPrecisionResets), motorEffectiveRPM(params.maxPrecisionResets) {
            
             lockUpTimer.timerInterval = 250;
-            preciseRotationTimer.timerInterval= 500;
+            preciseRotationTimer.timerInterval = 500;
+            systemCheckTimer.timerInterval = 100;
+
+        systemCheck = checkSystem();
+    }
+
+    bool checkSystem() {
+        int firstValue = pot.readValue();
+        setRotation(targetValue);
+        motor.rotate();
+        delay(300);
+        motor.stop();
+        int secondValue = pot.readValue();
+
+        if (abs(secondValue - targetValue) > abs(firstValue - targetValue)) {
+            Serial.print("ERROR: Motor is not synced with potentiometer");
+            return false; 
+        }
+
+        return true; 
     }
  
     // Method to check if the value is within the uncertainty range
@@ -266,6 +288,7 @@ public:
  
     // Main method to control motor rotation
     void rotate() {
+        pot.printData();
         if (isMoving) {
             if (!motorSet) {
                 startMotor();
@@ -332,7 +355,7 @@ public:
             // Check if the motor is within the accepted range
             if (setAngleRotation && !rotationCheck) {
                 if (!isOutsideRange(value, targetValue, rotationUncertainty)) {
-                    if (maxPrecisionResets != -1 && precisionResets != maxPrecisionResets) {
+                    if (maxPrecisionResets != -1 && precisionResets != maxPrecisionResets-1) {
                         motor.stop();
                         preciseRotationTimer.reset();
                         rotationCheck = true;
@@ -420,20 +443,20 @@ struct Button {
  
 class Wrist {
 private:
-  Button input1 = Button(10); // leftmost button
+  Button input1 = Button(12); // leftmost button
   Button input2 = Button(11); // rightmost button
  
   bool lastb1State = false;
   bool lastb2State = false;
  
-  Motor motor1{6, 7, 5}; // In a real-life circuit, even numbers on Arduino and L298N are connected
-  Potentiometer pot1{A0};
+  Motor motor1{9, 8,10}; // In a real-life circuit, even numbers on Arduino and L298N are connected
+  Potentiometer pot1{A1};
  
   RotationSpeedPair speedPairs[4] = {
-        {0, 45},
-        {40, 180},
-        {80, 255},
-        {100, 255},
+        {0, 255},
+      {40, 255},
+      {80, 255},
+      {100, 255},
     };
  
   int numberOfPairs = sizeof(speedPairs) / sizeof(speedPairs[0]);
@@ -442,7 +465,7 @@ private:
       .minPotValue = 5,
       .maxPotValue = 95,
       .rotationUncertainty = 0.0f,
-      .maxLockDuration = -1,
+      .maxLockDuration = 2000,
       .speedBoostAmount = 10,
       .isDecaying = true,
       .maxPrecisionResets = 3,
@@ -453,37 +476,35 @@ private:
  
 public:
   void loop() {
-    //pot1.printData();
- 
     bool b1state = input1.readButton();
     bool b2state = input2.readButton();
     int b1duration = input1.getPressDuration();
     int b2duration = input2.getPressDuration();
- 
+
     if (((b1state != lastb1State) || (b2state != lastb2State)) && !motor.setAngleRotation) {
-      if (b1state == HIGH && b2state == LOW) {
+    if (b1state == HIGH && b2state == LOW) {
         Serial.println("AntiClockwise");
         motor.setRotation(false);
-      }
-      if (b1state == LOW && b2state == HIGH) {
+    }
+    if (b1state == LOW && b2state == HIGH) {
         Serial.println("Clockwise");
         motor.setRotation(true);
-      }
-      if (b1state == b2state) {
+    }
+    if (b1state == b2state) {
         Serial.println("Low");
         motor.stopMotor();
-      }
-      lastb1State = b1state;
-      lastb2State = b2state;
     }
- 
-    if (b1state == HIGH && b2state == HIGH && !motor.setAngleRotation) {
-      int holdDuration = 4000;
-      if (b1duration >= holdDuration && b2duration >= holdDuration) {
+    lastb1State = b1state;
+    lastb2State = b2state;
+    }
+
+    if (b1state == LOW && b2state == LOW && !motor.setAngleRotation) {
+    int holdDuration = 4000;
+    if (b1duration >= holdDuration && b2duration >= holdDuration) {
         float normalAngle = 50.0f;
         motor.setRotation(normalAngle);
         Serial.println("Set Rotation");
-      }
+    }
     }
     motor.rotate();
   }
@@ -491,21 +512,21 @@ public:
  
 class Hand {
 private:
-  Button input3 = Button(10); // leftmost button
-  Button input4 = Button(11); // rightmost button
+  Button input3 = Button(8); // leftmost button
+  Button input4 = Button(9); // rightmost button
  
   bool lastb3State = false;
   bool lastb4State = false;
- 
+
   bool latch = false;
   bool opening = true;
  
-  Motor motor2{6,7,5}; // In a real-life circuit, even numbers on Arduino and L298N are connected
-  Potentiometer pot2{A0};
+  Motor motor2{4,0,5}; // In a real-life circuit, even numbers on Arduino and L298N are connected
+  Potentiometer pot2{A1};
  
   RotationSpeedPair speedPairs[4] = {
-      {0, 255},
-      {40, 255},
+      {0, 100},
+      {40, 100},
       {80, 255},
       {100, 255},
   };
@@ -514,13 +535,13 @@ private:
  
   RotationSpeedTable speedTable{speedPairs, numberOfPairs, true};
   MotorControlParameters motorParams = {
-      .minPotValue = 5,
-      .maxPotValue = 95,
+      .minPotValue = 20,
+      .maxPotValue = 85,
       .rotationUncertainty = 0.0f,
-      .maxLockDuration = 4000,
+      .maxLockDuration = 2000,
       .speedBoostAmount = 10,
       .isDecaying = true,
-      .maxPrecisionResets = 3,
+      .maxPrecisionResets = -1,
       .motorEffectiveRPM = 30,
   };
  
@@ -528,66 +549,84 @@ private:
  
 public:
   void loop() {
-    bool b3state = input3.readButton();
-    bool b4state = input4.readButton();
-    int b3duration = input3.getPressDuration();
-    int b4duration = input4.getPressDuration();
- 
-    if (b4state != lastb4State) {
-      if (b4state && !opening) {
-        latch = !latch;
-      }
-      lastb4State = b4state;
-    }
- 
-    if (b3state != lastb3State) {
-      if (!latch) {
-        if (!b3state) {
-          float openFingersAngle = 25.0f;
-          motor.stopMotor();
-          motor.setRotation(openFingersAngle);
-          opening = true;
-        } else {
-          motor.stopMotor();
-          motor.setRotation(true);
-          opening = false;
+    pot2.printData();
+    //Serial.print(pot2.readValue());
+    //Serial.print(input3.readButton());
+    if (motor.systemCheck||true) {
+        bool b3state = input3.readButton();
+        bool b4state = input4.readButton();
+        int b3duration = input3.getPressDuration();
+        int b4duration = input4.getPressDuration();
+    
+        if (b4state != lastb4State) {
+        if (b4state && !opening) {
+            latch = !latch;
         }
-      }
-      lastb3State = b3state;
+        lastb4State = b4state;
+        }
+    
+        if (b3state != lastb3State) {
+        if (!latch) {
+            if (!b3state) {
+            float openFingersAngle = 60.0f;
+            motor.stopMotor();
+            motor.setRotation(openFingersAngle);
+            opening = true;
+            } else {
+            motor.stopMotor();
+            motor.setRotation(true);
+            opening = false;
+            }
+        }
+        lastb3State = b3state;
+        }
+        if (!opening) {
+        if (latch) {
+            motor.stopMotor();
+        }
+        }
+    
+        motor.rotate();
     }
-    if (!opening) {
-      if (latch) {
-        motor.stopMotor();
-      }
-    }
- 
-    motor.rotate();
   }
 };
 
 class Battery {
 private:
     int managementKey;           // Pin connected to the charge/discharge/protection/boost board's KEY input
+    int offSwitchPin;            // Pin connected to the off switch
     ProgramTimer toggleTimer;    // Timer to control the toggling of the management key pin
     ProgramTimer highTimer;      // Timer to keep the pin high for one second
     bool isHigh = false;         // Flag to track the state of the output pin
     bool toggle = false;         // Flag to toggle the output pin
+    bool isOff = false;          // Flag to track if the output is turned off
 
 public:
 
-    Battery(int keyPin = 2) : managementKey(keyPin) {
-        pinMode(managementKey, OUTPUT); 
-        toggleTimer.timerInterval = 10000; // Set timer interval to 10 seconds for toggling
+    Battery(int keyPin = 13, int offPin = 2) : managementKey(keyPin), offSwitchPin(offPin) {
+        pinMode(managementKey, OUTPUT);
+        pinMode(offSwitchPin, INPUT_PULLUP); // Assuming the off switch pin is connected to ground when pressed
+        toggleTimer.timerInterval = 20000; // Set timer interval to 20 seconds for toggling
         highTimer.timerInterval = 1000;    // Set timer interval to 1 second for keeping pin high
     }
 
     // Loop function to toggle the management key pin state at a regular interval
     void loop() {
-        if (toggleTimer.interval()) { 
-            toggle = true; // Set toggle flag to true every 10 seconds
+        // Check if the off switch is pressed
+        if (digitalRead(offSwitchPin) == LOW) {
+            isOff = true;
+            Serial.print("OFF");
+            return;
+        } else {
+            isOff = false;
         }
         
-        if (toggle) {
+        // If not turned off, continue normal operation
+        if (toggleTimer.interval()) { 
+            toggle = true; // Set toggle flag to true every 20 seconds
+        }
+        
+        if (toggle && !isOff) {
             if (!isHigh) {
                 digitalWrite(managementKey, HIGH);
                 isHigh = true;
@@ -603,18 +642,160 @@ public:
     }
 };
 
- 
+struct IO {
+    int* livePins;     // Array of live pin numbers
+    int* groundPins;   // Array of ground pin numbers
+    int liveCount;     // Number of live pins
+    int groundCount;   // Number of ground pins
+
+    // Constructor to initialize the IO struct with pins
+    IO(int* live, int liveCount, int* ground, int groundCount)
+        : livePins(live), liveCount(liveCount), groundPins(ground), groundCount(groundCount) {}
+
+    // Method to set live pins HIGH and ground pins LOW
+    void setLiveAndGround() {
+        for (int i = 0; i < liveCount; ++i) {
+            pinMode(livePins[i], OUTPUT);
+            digitalWrite(livePins[i], HIGH);
+        }
+
+        for (int i = 0; i < groundCount; ++i) {
+            pinMode(groundPins[i], OUTPUT);
+            digitalWrite(groundPins[i], LOW);
+        }
+    }
+};
+
+
+class Management {
+private:
+    // Variables
+    int mode; // Mode identifier
+    Button* buttonArray; // Pointer to an array of Button objects
+    int numberOfButtons; // Number of buttons in the array
+    Potentiometer* potArray; // Pointer to an array of Potentiometer objects
+    int numberOfPotentiometers; // Number of potentiometers in the array
+    Motor* motor; // Pointer to a Motor object
+    ProgramTimer timer; // Timer for managing the interval between operations
+    unsigned long timerInterval; // Timer interval
+
+public:
+    // Constructors
+    Management() : mode(0), buttonArray(nullptr), numberOfButtons(0), potArray(nullptr), numberOfPotentiometers(0), motor(nullptr) {} // Initialize mode to 0
+
+    // Overloaded constructor for button panel test mode
+    Management(Button* buttons, int count, unsigned long interval = 5000) : mode(1), buttonArray(buttons), numberOfButtons(count), timerInterval(interval) {
+        timer.timerInterval = timerInterval;
+    }
+
+    // Overloaded constructor for potentiometer display mode
+    Management(Potentiometer* pots, int count, unsigned long interval = 5000) : mode(2), potArray(pots), numberOfPotentiometers(count), timerInterval(interval) {
+        timer.timerInterval = timerInterval;
+    }
+
+    // Overloaded constructor for motor rotation mode
+    Management(Motor* m, unsigned long interval = 5000) : mode(3), motor(m), timerInterval(interval) {
+        timer.timerInterval = timerInterval;
+        motor->setSpeed(255);
+    }
+
+    // Methods
+    void executeOperation() {
+        if (mode == 1) { // Button panel test mode
+            displayButtonValues();
+        } else if (mode == 2) { // Potentiometer display mode
+            displayPotentiometerValues();
+        } else if (mode == 3) { // Motor rotation mode
+            rotateMotor();
+        }
+    }
+
+    void displayButtonValues() {
+    if (mode == 1) { // Button panel test mode
+            Serial.println("Button Panel Test Mode");
+            Serial.println("----------------------");
+            for (int i = 0; i < numberOfButtons; ++i) {
+                Serial.print("Button ");
+                Serial.print(i + 1);
+                Serial.print(": ");
+                Serial.println(buttonArray[i].readButton() ? "Pressed" : "Released");
+            }
+            Serial.println();
+        }
+    }
+
+    void displayPotentiometerValues() {
+        if (mode == 2) { // Potentiometer display mode
+            Serial.println("Potentiometer Display Mode");
+            Serial.println("--------------------------");
+            for (int i = 0; i < numberOfPotentiometers; ++i) {
+                Serial.print("Potentiometer ");
+                Serial.print(i + 1);
+                Serial.print(": ");
+                Serial.print("Value: ");
+                Serial.println(potArray[i].readValue());
+            }
+            Serial.println();
+        }
+    }    
+
+    void rotateMotor() {
+        if (Serial.available() > 0) {
+            char input = Serial.read();
+            if (input == 'C' || input == 'c') {
+                motor->isClockwise = true;
+            } else if (input == 'A' || input == 'a') {
+                motor->isClockwise = false;
+            }
+
+            motor->rotate();
+            delay(500); // Rotate for half a second
+            motor->stop();
+        }
+    }
+
+    void mainLoop() {
+        if (timer.interval()) {
+            executeOperation();
+        }
+    }
+};
+
+// Define live and ground pins
+int livePins[] = {A7,7};   
+int groundPins[] = {A5,8};   
+IO io(livePins, sizeof(livePins) / sizeof(livePins[0]), groundPins, sizeof(groundPins) / sizeof(groundPins[0]));
+
+
+
 void setup() {
-  // Setup code goes here
-  Serial.begin(115200);
+    Serial.begin(115200);
+    io.setLiveAndGround();
+    
 }
- 
+//Potentiometer potentiometers[] = {Potentiometer(A1)};
+//Management manager(potentiometers, sizeof(potentiometers) / sizeof(potentiometers[0]), 200);
+
+//Button buttons[] = {Button(12), Button(11), Button(10), Button(9)};
+//Management manager(buttons, sizeof(buttons) / sizeof(buttons[0]), 200);
+
+//Motor motortest{8,9,10};
+//435 for wrist 
+//201 for hand
+//Management manager(&motortest,10);
+
+
 //Hand hand;
-Wrist wrist;
-Battery battery;
- 
+//Battery battery;
+
 void loop() {
+  Serial.print("HELLO");
+  //manager.mainLoop();
   //hand.loop();
-  wrist.loop();
-  battery.loop();
+    //battery.loop();
 }
+
+
+
+// HAND: LOWER IS 20, UPPER 85  
+// OPEN IS 70
