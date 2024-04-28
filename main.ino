@@ -512,8 +512,8 @@ public:
  
 class Hand {
 private:
-  Button input3 = Button(8); // leftmost button
-  Button input4 = Button(9); // rightmost button
+  Button input3 = Button(5); // leftmost button
+  Button input4 = Button(4); // rightmost button
  
   bool lastb3State = false;
   bool lastb4State = false;
@@ -521,7 +521,7 @@ private:
   bool latch = false;
   bool opening = true;
  
-  Motor motor2{4,0,5}; // In a real-life circuit, even numbers on Arduino and L298N are connected
+  Motor motor2{13,12,11}; // In a real-life circuit, even numbers on Arduino and L298N are connected
   Potentiometer pot2{A1};
  
   RotationSpeedPair speedPairs[4] = {
@@ -552,7 +552,7 @@ public:
     pot2.printData();
     //Serial.print(pot2.readValue());
     //Serial.print(input3.readButton());
-    if (motor.systemCheck||true) {
+    if (true) {
         bool b3state = input3.readButton();
         bool b4state = input4.readButton();
         int b3duration = input3.getPressDuration();
@@ -568,7 +568,7 @@ public:
         if (b3state != lastb3State) {
         if (!latch) {
             if (!b3state) {
-            float openFingersAngle = 60.0f;
+            float openFingersAngle = 40.0f;
             motor.stopMotor();
             motor.setRotation(openFingersAngle);
             opening = true;
@@ -641,31 +641,6 @@ public:
         }
     }
 };
-
-struct IO {
-    int* livePins;     // Array of live pin numbers
-    int* groundPins;   // Array of ground pin numbers
-    int liveCount;     // Number of live pins
-    int groundCount;   // Number of ground pins
-
-    // Constructor to initialize the IO struct with pins
-    IO(int* live, int liveCount, int* ground, int groundCount)
-        : livePins(live), liveCount(liveCount), groundPins(ground), groundCount(groundCount) {}
-
-    // Method to set live pins HIGH and ground pins LOW
-    void setLiveAndGround() {
-        for (int i = 0; i < liveCount; ++i) {
-            pinMode(livePins[i], OUTPUT);
-            digitalWrite(livePins[i], HIGH);
-        }
-
-        for (int i = 0; i < groundCount; ++i) {
-            pinMode(groundPins[i], OUTPUT);
-            digitalWrite(groundPins[i], LOW);
-        }
-    }
-};
-
 
 class Management {
 private:
@@ -761,37 +736,67 @@ public:
     }
 };
 
+struct IO {
+    int* livePins;     // Array of live pin numbers
+    int* groundPins;   // Array of ground pin numbers
+    int liveCount;     // Number of live pins
+    int groundCount;   // Number of ground pins
+
+    // Constructor to initialize the IO struct with pins
+    IO(int* live, int liveCount, int* ground, int groundCount)
+        : livePins(live), liveCount(liveCount), groundPins(ground), groundCount(groundCount) {}
+
+    // Method to set live pins HIGH and ground pins LOW
+    void setLiveAndGround() {
+        for (int i = 0; i < liveCount; ++i) {
+            pinMode(livePins[i], OUTPUT);
+            digitalWrite(livePins[i], HIGH);
+        }
+
+        for (int i = 0; i < groundCount; ++i) {
+            pinMode(groundPins[i], OUTPUT);
+            digitalWrite(groundPins[i], LOW);
+        }
+    }
+};
+
+
+
 // Define live and ground pins
-int livePins[] = {A7,7};   
-int groundPins[] = {A5,8};   
+int livePins[] = {A0, 7};   
+int groundPins[] = {A2, 6};   
 IO io(livePins, sizeof(livePins) / sizeof(livePins[0]), groundPins, sizeof(groundPins) / sizeof(groundPins[0]));
 
 
 
 void setup() {
     Serial.begin(115200);
+    delay(1000);
     io.setLiveAndGround();
+    
     
 }
 //Potentiometer potentiometers[] = {Potentiometer(A1)};
-//Management manager(potentiometers, sizeof(potentiometers) / sizeof(potentiometers[0]), 200);
+//Management Pmanager(potentiometers, sizeof(potentiometers) / sizeof(potentiometers[0]), 200);
 
-//Button buttons[] = {Button(12), Button(11), Button(10), Button(9)};
-//Management manager(buttons, sizeof(buttons) / sizeof(buttons[0]), 200);
+//Button buttons[] = {Button(11), Button(10), Button(9), Button(8)};
+//Management manager(buttons, sizeof(buttons) / sizeof(buttons[0]), 500);
 
-//Motor motortest{8,9,10};
+//Motor motortest{12,13,11};
+
 //435 for wrist 
 //201 for hand
 //Management manager(&motortest,10);
 
 
-//Hand hand;
+
+Hand hand;
 //Battery battery;
 
 void loop() {
-  Serial.print("HELLO");
   //manager.mainLoop();
-  //hand.loop();
+  //Pmanager.mainLoop();
+  hand.loop();
     //battery.loop();
 }
 
